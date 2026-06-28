@@ -1,0 +1,44 @@
+Part8UserAwarePlanner[@T]: {
+    S: {
+        COMMAND_PLANNER_INSTRUCTIONS
+        USER_AWARENESS_INSTRUCTIONS
+        MEMORY_INSTRUCTIONS
+        HISTORY_REFERENCE_INSTRUCTIONS
+        RICHER_INTERACTION_INSTRUCTIONS
+        CLARIFICATION_INSTRUCTIONS
+        ASK_CLARIFICATION_TOOL
+        COMMAND_PLANNER_OUTPUT_FORMAT
+    }
+    U: sys.current_directory[@T]
+    U: sys.recent_user_shell_history[@T]
+    U: sys.user_memories[@T]
+    U: sys.recent_doit_history[@T]
+    U: env.user_instruction[@T]
+}
+
+Part8UserAwareFollowupPlanner[@T]: {
+    S: {
+        COMMAND_PLANNER_INSTRUCTIONS
+        USER_AWARENESS_INSTRUCTIONS
+        MEMORY_INSTRUCTIONS
+        HISTORY_REFERENCE_INSTRUCTIONS
+        RICHER_INTERACTION_INSTRUCTIONS
+        CLARIFICATION_ANSWER_INSTRUCTIONS
+        ASK_CLARIFICATION_TOOL
+        COMMAND_PLANNER_OUTPUT_FORMAT
+    }
+    U: sys.current_directory[@T]
+    U: sys.recent_user_shell_history[@T]
+    U: sys.user_memories[@T]
+    U: sys.recent_doit_history[@T]
+    U: env.clarification_answer[@T]
+    U: env.user_instruction[@T]
+}
+
+Part8SafetyJudge[@T]: {
+    S: {
+        SAFETY_CHECK_INSTRUCTIONS
+        SAFETY_CHECK_OUTPUT_FORMAT
+    }
+    U: resp.generated_command[@T]
+}

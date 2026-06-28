@@ -1,0 +1,38 @@
+Part7MemoryPlanner[@T]: {
+    S: {
+        COMMAND_PLANNER_INSTRUCTIONS
+        MEMORY_INSTRUCTIONS
+        HISTORY_REFERENCE_INSTRUCTIONS
+        RICHER_INTERACTION_INSTRUCTIONS
+        CLARIFICATION_INSTRUCTIONS
+        ASK_CLARIFICATION_TOOL
+        COMMAND_PLANNER_OUTPUT_FORMAT
+    }
+    U: sys.user_memories[@T]
+    U: sys.recent_history[@T]
+    U: env.user_instruction[@T]
+}
+
+Part7MemoryFollowupPlanner[@T]: {
+    S: {
+        COMMAND_PLANNER_INSTRUCTIONS
+        MEMORY_INSTRUCTIONS
+        HISTORY_REFERENCE_INSTRUCTIONS
+        RICHER_INTERACTION_INSTRUCTIONS
+        CLARIFICATION_ANSWER_INSTRUCTIONS
+        ASK_CLARIFICATION_TOOL
+        COMMAND_PLANNER_OUTPUT_FORMAT
+    }
+    U: sys.user_memories[@T]
+    U: sys.recent_history[@T]
+    U: env.clarification_answer[@T]
+    U: env.user_instruction[@T]
+}
+
+Part7SafetyJudge[@T]: {
+    S: {
+        SAFETY_CHECK_INSTRUCTIONS
+        SAFETY_CHECK_OUTPUT_FORMAT
+    }
+    U: resp.generated_command[@T]
+}

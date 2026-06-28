@@ -10,6 +10,8 @@ This project was built for Assignment 3: Agents. It currently supports:
 - hosted Gemini and local Ollama models via `~/doit.cfg`
 - dangerous-command detection and user confirmation
 - multi-turn history in `~/.doit/history.jsonl`
+- user-awareness from recent shell history
+- multi-terminal context separation with `DOIT_SESSION_ID`
 - report-oriented logs in `~/.doit/report_history.jsonl`
 - clarifying questions through tool calls or JSON fallback
 - ACDL prompt documentation under `docs/acdl/`
@@ -69,12 +71,29 @@ and asks for confirmation before running it.
 If the request is ambiguous, `doit` may ask a clarification question and then
 continue planning after the answer.
 
+For reliable awareness of commands typed in the current Bash session, add this
+to your shell setup:
+
+```bash
+export DOIT_SESSION_ID="${DOIT_SESSION_ID:-$$_$(date +%s)}"
+export PROMPT_COMMAND="history -a; history -n${PROMPT_COMMAND:+; $PROMPT_COMMAND}"
+```
+
+`DOIT_SESSION_ID` lets `doit` keep separate context streams for different
+terminal windows. Without it, `doit` falls back to grouping history by current
+directory. Without the `PROMPT_COMMAND` hook, Bash may not write
+current-session commands to `~/.bash_history` until the terminal exits.
+
 ## State Files
 
 Runtime state is stored outside the repository:
 
 - `~/.doit/history.jsonl`: compact history used for multi-turn context
+- `DOIT_SESSION_ID`: optional terminal-window id for multi-tasking context
+- `~/.bash_history` or `$HISTFILE`: recent user shell commands used for user awareness
 - `~/.doit/report_history.jsonl`: richer invocation log for the report
+- `~/.doit/error_history.jsonl`: compact failure log for debugging
+- `~/.doit/memories.jsonl`: durable user facts and preferences
 - `~/doit.cfg`: model configuration
 
 These files are intentionally not committed.

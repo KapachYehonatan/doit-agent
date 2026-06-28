@@ -1,10 +1,19 @@
 import argparse
+import os
 import sys
 
 from doit_agent.history import (
+    append_error_history,
+    append_memories,
     append_history,
     append_report_history,
-    format_history,
+    current_session,
+    format_session_history,
+    format_memories,
+    format_user_context,
+    HISTORY_SCAN_LIMIT,
+    load_memories,
+    load_recent_shell_history,
     load_recent_history,
 )
 from doit_agent.llm import (
@@ -23,8 +32,9 @@ from doit_agent.types import (
 )
 
 
-AGENT_VERSION = "part5_clarifications"
+AGENT_VERSION = "part10_multi_tasking"
 REPORT_TEXT_LIMIT = 4000
+HISTORY_OUTPUT_LIMIT = 1000
 MAX_CLARIFICATIONS = 3
 
 
@@ -41,17 +51,41 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     instruction = " ".join(args.instruction).strip()
-    history_context = format_history(load_recent_history())
+    loaded_memories = load_memories()
+    memory_context = format_memories(loaded_memories)
+    cwd = os.getcwd()
+    session = current_session(cwd)
+    history_context = format_session_history(
+        load_recent_history(limit=HISTORY_SCAN_LIMIT),
+        session["id"],
+        cwd,
+    )
+    shell_commands = load_recent_shell_history()
+    user_context = format_user_context(cwd, shell_commands)
     report = {
         "agent_version": AGENT_VERSION,
         "instruction": instruction,
+        "session": session,
         "planner_calls": [],
+        "user_context": {
+            "cwd": cwd,
+            "recent_shell_commands": shell_commands,
+        },
     }
+    if loaded_memories:
+        report["memories_loaded"] = [
+            memory["memory"] for memory in loaded_memories if "memory" in memory
+        ]
     clarifications: list[dict[str, object]] = []
 
     try:
         response = _plan_with_clarifications(
-            instruction, history_context, clarifications, report
+            instruction,
+            history_context,
+            memory_context,
+            user_context,
+            clarifications,
+            report,
         )
         if response is None:
             return 0
@@ -137,6 +171,8 @@ def main(argv: list[str] | None = None) -> int:
             "stderr": _truncate(result.stderr),
             "returncode": result.returncode,
         }
+        if result.returncode == 0:
+            _store_memories(response, instruction, report)
         append_history(
             {
                 "instruction": instruction,
@@ -144,6 +180,13 @@ def main(argv: list[str] | None = None) -> int:
                 "command": response.command,
                 "executed": True,
                 "returncode": result.returncode,
+                **({"stdout": _truncate_history(result.stdout)} if result.stdout else {}),
+                **({"stderr": _truncate_history(result.stderr)} if result.stderr else {}),
+                **(
+                    {"memories": response.memories}
+                    if result.returncode == 0 and response.memories
+                    else {}
+                ),
                 **({"clarifications": clarifications} if clarifications else {}),
             }
         )
@@ -152,12 +195,17 @@ def main(argv: list[str] | None = None) -> int:
 
     assert response.message is not None
     print(response.message)
+    if response.command:
+        print(response.command)
     report["execution"] = {"executed": False, "returncode": None}
+    _store_memories(response, instruction, report)
     append_history(
         {
             "instruction": instruction,
             "kind": response.kind,
             "message": response.message,
+            **({"command": response.command} if response.command else {}),
+            **({"memories": response.memories} if response.memories else {}),
             "executed": False,
             "returncode": None,
             **({"clarifications": clarifications} if clarifications else {}),
@@ -170,6 +218,8 @@ def main(argv: list[str] | None = None) -> int:
 def _plan_with_clarifications(
     instruction: str,
     history_context: str | None,
+    memory_context: str | None,
+    user_context: str | None,
     clarifications: list[dict[str, object]],
     report: dict[str, object],
 ) -> AgentResponse | None:
@@ -177,6 +227,8 @@ def _plan_with_clarifications(
         completion = complete_instruction_with_trace(
             instruction,
             history_context=history_context,
+            memory_context=memory_context,
+            user_context=user_context,
             clarification_context=_format_clarifications(clarifications),
         )
         response = completion.response
@@ -263,6 +315,17 @@ def _record_planner_call(
     planner_calls.append(planner_call)
 
 
+def _store_memories(
+    response: AgentResponse,
+    instruction: str,
+    report: dict[str, object],
+) -> None:
+    if not response.memories:
+        return
+    append_memories(response.memories, instruction)
+    report["memories_stored"] = response.memories
+
+
 def _ask_clarification(response: AgentResponse) -> dict[str, object]:
     assert response.question is not None
     assert response.options is not None
@@ -310,12 +373,28 @@ def _format_clarifications(clarifications: list[dict[str, object]]) -> str | Non
 def _append_report_error(
     report: dict[str, object], stage: str, exc: Exception
 ) -> None:
-    report["error"] = {
+    error = {
         "stage": stage,
         "type": type(exc).__name__,
         "message": str(exc),
     }
+    raw_content = getattr(exc, "raw_content", None)
+    if isinstance(raw_content, str):
+        error["raw_content"] = _truncate(raw_content)
+    report["error"] = error
     append_report_history(report)
+    append_error_history(
+        {
+            "agent_version": report.get("agent_version"),
+            "instruction": report.get("instruction"),
+            "session": report.get("session"),
+            "error": error,
+            "user_context": report.get("user_context"),
+            "memories_loaded": report.get("memories_loaded"),
+            "planner_calls": report.get("planner_calls"),
+            "safety": report.get("safety"),
+        }
+    )
 
 
 def _agent_response_dict(response: AgentResponse) -> dict[str, object]:
@@ -328,6 +407,8 @@ def _agent_response_dict(response: AgentResponse) -> dict[str, object]:
         payload["question"] = response.question
     if response.options is not None:
         payload["options"] = response.options
+    if response.memories is not None:
+        payload["memories"] = response.memories
     return payload
 
 
@@ -341,6 +422,8 @@ def _safety_assessment_dict(assessment: SafetyAssessment) -> dict[str, object]:
     }
     if assessment.llm_call is not None:
         payload["llm_call"] = _llm_call_dict(assessment.llm_call)
+    if assessment.error is not None:
+        payload["error"] = assessment.error
     return payload
 
 
@@ -360,6 +443,12 @@ def _truncate(text: str) -> str:
     if len(text) <= REPORT_TEXT_LIMIT:
         return text
     return text[:REPORT_TEXT_LIMIT] + "\n[truncated]"
+
+
+def _truncate_history(text: str) -> str:
+    if len(text) <= HISTORY_OUTPUT_LIMIT:
+        return text
+    return text[:HISTORY_OUTPUT_LIMIT] + "\n[truncated]"
 
 
 def _user_input(call: LlmCall) -> str | None:

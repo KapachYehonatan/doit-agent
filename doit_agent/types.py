@@ -12,6 +12,7 @@ class AgentResponse:
     message: str | None = None
     question: str | None = None
     options: list[str] | None = None
+    memories: list[str] | None = None
 
 
 @dataclass(frozen=True)
@@ -58,3 +59,4 @@ class SafetyAssessment:
     decision: SafetyDecision
     source: str
     llm_call: LlmCall | None = None
+    error: str | None = None

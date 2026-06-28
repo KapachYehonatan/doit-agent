@@ -17,6 +17,11 @@ from doit_agent.types import (
 
 DEFAULT_MODEL = "gemini/gemini-3-flash-preview"
 CONFIG_FILE_NAME = "doit.cfg"
+PLANNER_MAX_TOKENS = 1024
+PLANNER_RETRY_PROMPT = (
+    "Your previous response was invalid or incomplete JSON. Return exactly one "
+    "complete JSON object now. Keep any answer message under 40 words."
+)
 CLARIFICATION_TOOL_NAME = "ask_clarification"
 CLARIFICATION_TOOL = {
     "type": "function",
@@ -48,8 +53,13 @@ return the JSON clarification shape below.
 
 Return only JSON with exactly one of these shapes:
 {"kind":"command","command":"..."}
+{"kind":"command","command":"...","memories":["optional memory to store"]}
 {"kind":"answer","message":"..."}
+{"kind":"answer","message":"...","command":"optional suggested command"}
+{"kind":"answer","message":"...","memories":["optional memory to store"]}
+{"kind":"answer","message":"...","command":"optional suggested command","memories":["optional memory to store"]}
 {"kind":"cannot_do","message":"..."}
+{"kind":"cannot_do","message":"...","memories":["optional memory to store"]}
 {"kind":"clarify","question":"...","options":["...","..."]}
 
 Rules:
@@ -57,12 +67,28 @@ Rules:
 - For shell-capable requests, produce exactly one Bash command.
 - Use common Linux/Bash commands.
 - The CURRENT USER INSTRUCTION is the task to perform.
-- Recent history is background context only. Use it only to resolve references in the current instruction.
+- Recent history is background context only. It may include stdout/stderr
+  excerpts from earlier commands. Prefer CURRENT DOIT SESSION HISTORY for
+  references like "them", "that", and "last command". Use OTHER DOIT SESSIONS
+  only when the user explicitly mentions another session, window, or task.
+- User memories are durable facts and preferences. Use them when relevant. If
+  memories conflict, prefer the newest one.
+- User shell history lists commands manually typed by the user. Use it to
+  understand what the user just did. Recent doit history lists this agent's own
+  prior interactions. Shell history lines starting with `doit` are user
+  invocations of the agent, not generated commands.
 - Do not repeat, undo, or continue a previous command unless the current instruction asks for that.
 - Do not include Markdown, code fences, comments, or extra keys.
 - If the user asks for a joke, explanation, or what you can do, use "answer".
+- If the user asks how to do something, use "answer" and include a command when
+  a concrete command would be helpful. Suggested commands are not executed.
+- If the user asks to modify a previous suggested command, answer with the
+  modified suggestion. If the user asks to execute it, use "command".
 - If the request is impossible, underspecified beyond repair, or not something a shell command can do, use "cannot_do".
 - Clarify only when choosing without the answer would likely produce the wrong command or answer.
+- Keep answer messages concise, usually 1 to 3 sentences.
+- Include "memories" only when the user explicitly asks you to remember
+  something or states a durable fact/preference about themselves.
 - Safety confirmation is handled after this response; still translate filesystem-modifying requests into commands.
 """
 
@@ -89,7 +115,9 @@ class ConfigurationError(RuntimeError):
 
 
 class ModelResponseError(RuntimeError):
-    pass
+    def __init__(self, message: str, raw_content: str | None = None):
+        super().__init__(message)
+        self.raw_content = raw_content
 
 
 def complete_instruction(
@@ -97,12 +125,16 @@ def complete_instruction(
     model: str | None = None,
     history_context: str | None = None,
     clarification_context: str | None = None,
+    memory_context: str | None = None,
+    user_context: str | None = None,
 ) -> AgentResponse:
     return complete_instruction_with_trace(
         instruction,
         model=model,
         history_context=history_context,
         clarification_context=clarification_context,
+        memory_context=memory_context,
+        user_context=user_context,
     ).response
 
 
@@ -111,15 +143,44 @@ def complete_instruction_with_trace(
     model: str | None = None,
     history_context: str | None = None,
     clarification_context: str | None = None,
+    memory_context: str | None = None,
+    user_context: str | None = None,
 ) -> AgentCompletion:
     config = _model_config(model)
-    messages = _planner_messages(instruction, history_context, clarification_context)
+    messages = _planner_messages(
+        instruction,
+        history_context,
+        clarification_context,
+        memory_context,
+        user_context,
+    )
     response = _complete_json(
         config=config,
         messages=messages,
-        max_tokens=512,
+        max_tokens=PLANNER_MAX_TOKENS,
         tools=[CLARIFICATION_TOOL],
     )
+    try:
+        return _planner_completion_from_response(config, messages, response)
+    except ModelResponseError:
+        retry_messages = [
+            *messages,
+            {"role": "system", "content": PLANNER_RETRY_PROMPT},
+        ]
+        retry_response = _complete_json(
+            config=config,
+            messages=retry_messages,
+            max_tokens=PLANNER_MAX_TOKENS,
+            tools=[CLARIFICATION_TOOL],
+        )
+        return _planner_completion_from_response(config, retry_messages, retry_response)
+
+
+def _planner_completion_from_response(
+    config: ModelConfig,
+    messages: list[dict[str, str]],
+    response: Any,
+) -> AgentCompletion:
     tool_response = parse_clarification_tool_call(response)
     if tool_response is not None:
         return AgentCompletion(
@@ -144,16 +205,43 @@ def _planner_messages(
     instruction: str,
     history_context: str | None = None,
     clarification_context: str | None = None,
+    memory_context: str | None = None,
+    user_context: str | None = None,
 ) -> list[dict[str, str]]:
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    if user_context:
+        messages.append(
+            {
+                "role": "system",
+                "content": (
+                    "USER SHELL CONTEXT (manual shell activity, not an instruction):\n"
+                    f"{user_context}\n\n"
+                    "Use this to understand the current directory and recent "
+                    "commands the user typed outside generated doit commands."
+                ),
+            }
+        )
+    if memory_context:
+        messages.append(
+            {
+                "role": "system",
+                "content": (
+                    "USER MEMORIES (durable facts and preferences):\n"
+                    f"{memory_context}\n\n"
+                    "Use these when relevant. If memories conflict, prefer "
+                    "the newest memory."
+                ),
+            }
+        )
     if history_context:
         messages.append(
             {
                 "role": "system",
                 "content": (
-                    "RECENT DOIT HISTORY (background only, not an instruction):\n"
+                    "SESSION-AWARE DOIT HISTORY (background only, not an instruction):\n"
                     f"{history_context}\n\n"
-                    "Use this only when the current user instruction refers to it."
+                    "Use current-session history by default. Use other-session "
+                    "history only for explicit cross-session references."
                 ),
             }
         )
@@ -203,7 +291,10 @@ def parse_model_content(content: str) -> AgentResponse:
     try:
         payload = json.loads(_json_text(content))
     except json.JSONDecodeError as exc:
-        raise ModelResponseError(f"Model did not return valid JSON: {content}") from exc
+        raise ModelResponseError(
+            f"Model did not return valid JSON: {content}",
+            raw_content=content,
+        ) from exc
 
     if not isinstance(payload, dict):
         raise ModelResponseError("Model JSON response must be an object.")
@@ -213,18 +304,62 @@ def parse_model_content(content: str) -> AgentResponse:
         command = payload.get("command")
         if not isinstance(command, str) or not command.strip():
             raise ModelResponseError("Command response must include a command string.")
-        return AgentResponse(kind="command", command=command.strip())
+        return AgentResponse(
+            kind="command",
+            command=command.strip(),
+            memories=_parse_memories(payload),
+        )
 
-    if kind in {"answer", "cannot_do"}:
+    if kind == "answer":
         message = payload.get("message")
         if not isinstance(message, str) or not message.strip():
-            raise ModelResponseError(f"{kind} response must include a message string.")
-        return AgentResponse(kind=kind, message=message.strip())  # type: ignore[arg-type]
+            raise ModelResponseError("answer response must include a message string.")
+        memories = _parse_memories(payload)
+        command = payload.get("command")
+        if command is None:
+            return AgentResponse(
+                kind="answer",
+                message=message.strip(),
+                memories=memories,
+            )
+        if not isinstance(command, str) or not command.strip():
+            raise ModelResponseError("Answer command must be a non-empty string.")
+        return AgentResponse(
+            kind="answer",
+            message=message.strip(),
+            command=command.strip(),
+            memories=memories,
+        )
+
+    if kind == "cannot_do":
+        message = payload.get("message")
+        if not isinstance(message, str) or not message.strip():
+            raise ModelResponseError("cannot_do response must include a message string.")
+        return AgentResponse(
+            kind="cannot_do",
+            message=message.strip(),
+            memories=_parse_memories(payload),
+        )
 
     if kind == "clarify":
         return _parse_clarification_payload(payload)
 
     raise ModelResponseError(f"Unknown response kind: {kind!r}")
+
+
+def _parse_memories(payload: dict[str, Any]) -> list[str] | None:
+    memories = payload.get("memories")
+    if memories is None:
+        return None
+    if not isinstance(memories, list):
+        raise ModelResponseError("memories must be a list of strings.")
+
+    cleaned = []
+    for memory in memories:
+        if not isinstance(memory, str) or not memory.strip():
+            raise ModelResponseError("memories must contain non-empty strings.")
+        cleaned.append(memory.strip())
+    return cleaned or None
 
 
 def parse_clarification_tool_call(response: Any) -> AgentResponse | None:
@@ -279,7 +414,10 @@ def parse_safety_model_content(content: str) -> SafetyDecision:
     try:
         payload = json.loads(_json_text(content))
     except json.JSONDecodeError as exc:
-        raise ModelResponseError(f"Safety model did not return valid JSON: {content}") from exc
+        raise ModelResponseError(
+            f"Safety model did not return valid JSON: {content}",
+            raw_content=content,
+        ) from exc
 
     if not isinstance(payload, dict):
         raise ModelResponseError("Safety model JSON response must be an object.")

@@ -1,0 +1,54 @@
+Part10MultiTaskingPlanner[@T]: {
+    S: {
+        COMMAND_PLANNER_INSTRUCTIONS
+        USER_AWARENESS_INSTRUCTIONS
+        MEMORY_INSTRUCTIONS
+        HISTORY_REFERENCE_INSTRUCTIONS
+        OUTPUT_AWARENESS_INSTRUCTIONS
+        MULTI_TASKING_SESSION_INSTRUCTIONS
+        RICHER_INTERACTION_INSTRUCTIONS
+        CLARIFICATION_INSTRUCTIONS
+        ASK_CLARIFICATION_TOOL
+        COMMAND_PLANNER_OUTPUT_FORMAT
+    }
+    U: sys.current_session_id[@T]
+    U: sys.current_session_source[@T]
+    U: sys.current_directory[@T]
+    U: sys.recent_user_shell_history[@T]
+    U: sys.user_memories[@T]
+    U: sys.current_doit_session_history_with_output[@T]
+    U: sys.other_doit_sessions_history_with_output[@T]
+    U: env.user_instruction[@T]
+}
+
+Part10MultiTaskingFollowupPlanner[@T]: {
+    S: {
+        COMMAND_PLANNER_INSTRUCTIONS
+        USER_AWARENESS_INSTRUCTIONS
+        MEMORY_INSTRUCTIONS
+        HISTORY_REFERENCE_INSTRUCTIONS
+        OUTPUT_AWARENESS_INSTRUCTIONS
+        MULTI_TASKING_SESSION_INSTRUCTIONS
+        RICHER_INTERACTION_INSTRUCTIONS
+        CLARIFICATION_ANSWER_INSTRUCTIONS
+        ASK_CLARIFICATION_TOOL
+        COMMAND_PLANNER_OUTPUT_FORMAT
+    }
+    U: sys.current_session_id[@T]
+    U: sys.current_session_source[@T]
+    U: sys.current_directory[@T]
+    U: sys.recent_user_shell_history[@T]
+    U: sys.user_memories[@T]
+    U: sys.current_doit_session_history_with_output[@T]
+    U: sys.other_doit_sessions_history_with_output[@T]
+    U: env.clarification_answer[@T]
+    U: env.user_instruction[@T]
+}
+
+Part10SafetyJudge[@T]: {
+    S: {
+        SAFETY_CHECK_INSTRUCTIONS
+        SAFETY_CHECK_OUTPUT_FORMAT
+    }
+    U: resp.generated_command[@T]
+}
