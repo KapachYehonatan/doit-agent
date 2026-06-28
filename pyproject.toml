@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "llm-ass3-doit"
+version = "0.1.0"
+description = "Assignment 3 Part 1: a minimal shell-command LLM agent."
+requires-python = ">=3.11"
+dependencies = [
+    "litellm>=1.0",
+]
+
+[project.scripts]
+doit = "doit_agent.cli:main"
+
+[tool.setuptools]
+packages = ["doit_agent"]
+

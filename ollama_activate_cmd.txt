@@ -1,0 +1,9 @@
+PATH="$HOME/.local/bin:$PATH" \
+OLLAMA_HOST=127.0.0.1:11434 \
+OLLAMA_MAX_LOADED_MODELS=1 \
+OLLAMA_NUM_PARALLEL=1 \
+OLLAMA_MAX_QUEUE=1 \
+OLLAMA_NO_CLOUD=1 \
+nice -n 10 taskset -c 0-23 \
+prlimit --as=$((50*1024*1024*1024)) -- \
+ollama serve

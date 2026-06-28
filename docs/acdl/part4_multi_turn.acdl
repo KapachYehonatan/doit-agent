@@ -1,0 +1,17 @@
+Part4HistoryAwarePlanner[@T]: {
+    S: {
+        COMMAND_PLANNER_INSTRUCTIONS
+        HISTORY_REFERENCE_INSTRUCTIONS
+        COMMAND_PLANNER_OUTPUT_FORMAT
+    }
+    U: sys.recent_history[@T]
+    U: env.user_instruction[@T]
+}
+
+Part4SafetyJudge[@T]: {
+    S: {
+        SAFETY_CHECK_INSTRUCTIONS
+        SAFETY_CHECK_OUTPUT_FORMAT
+    }
+    U: resp.generated_command[@T]
+}

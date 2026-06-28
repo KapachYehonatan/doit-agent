@@ -1,0 +1,7 @@
+Part1CommandPlanner[@T]: {
+    S: {
+        COMMAND_PLANNER_INSTRUCTIONS
+        COMMAND_PLANNER_OUTPUT_FORMAT
+    }
+    U: env.user_instruction[@T]
+}

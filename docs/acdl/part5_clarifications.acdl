@@ -1,0 +1,32 @@
+Part5ClarifyingPlanner[@T]: {
+    S: {
+        COMMAND_PLANNER_INSTRUCTIONS
+        HISTORY_REFERENCE_INSTRUCTIONS
+        CLARIFICATION_INSTRUCTIONS
+        ASK_CLARIFICATION_TOOL
+        COMMAND_PLANNER_OUTPUT_FORMAT
+    }
+    U: sys.recent_history[@T]
+    U: env.user_instruction[@T]
+}
+
+Part5ClarificationFollowupPlanner[@T]: {
+    S: {
+        COMMAND_PLANNER_INSTRUCTIONS
+        HISTORY_REFERENCE_INSTRUCTIONS
+        CLARIFICATION_ANSWER_INSTRUCTIONS
+        ASK_CLARIFICATION_TOOL
+        COMMAND_PLANNER_OUTPUT_FORMAT
+    }
+    U: sys.recent_history[@T]
+    U: env.clarification_answer[@T]
+    U: env.user_instruction[@T]
+}
+
+Part5SafetyJudge[@T]: {
+    S: {
+        SAFETY_CHECK_INSTRUCTIONS
+        SAFETY_CHECK_OUTPUT_FORMAT
+    }
+    U: resp.generated_command[@T]
+}

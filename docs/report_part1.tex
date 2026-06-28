@@ -1,0 +1,93 @@
+\section{Part 1: Single Command at a Time}
+
+This first version implements a command line program named \texttt{doit}. It
+accepts one natural-language instruction, sends it to a hosted LLM, and receives
+a structured JSON response. The response is either a Bash command, a normal
+answer, or an explanation that the request cannot reasonably be handled as a
+shell command.
+
+The implementation uses LiteLLM with Gemini 3 Flash. The default model string is
+\texttt{gemini/gemini-3-flash-preview}, and the program expects the
+\texttt{GEMINI\_API\_KEY} environment variable to be set. The model can be
+overridden with \texttt{DOIT\_MODEL}, but the rest of the implementation does
+not depend on a specific provider.
+
+\subsection{Prompt Template}
+
+The system prompt asks the model to classify exactly one user instruction and to
+return only JSON:
+
+\begin{verbatim}
+You are the command planner for a small CLI program named doit.
+
+The user gives one natural-language instruction. Decide whether it should be:
+1. a single Bash command,
+2. a normal conversational answer, or
+3. a short explanation that the request cannot be done as a shell command.
+
+Return only JSON with exactly one of these shapes:
+{"kind":"command","command":"..."}
+{"kind":"answer","message":"..."}
+{"kind":"cannot_do","message":"..."}
+
+Rules:
+- For shell-capable requests, produce exactly one Bash command.
+- Use common Linux/Bash commands.
+- Do not include Markdown, code fences, comments, or extra keys.
+- If the user asks for a joke, explanation, or what you can do, use "answer".
+- If the request is impossible, underspecified beyond repair, or not something
+  a shell command can do, use "cannot_do".
+- Do not ask clarification questions in this version.
+- Safety confirmation is not implemented in this version; still translate
+  filesystem-modifying requests into commands.
+\end{verbatim}
+
+The user instruction is sent as the single user message after this system
+prompt. There is no memory, history, clarification loop, or safety gate in this
+version.
+
+\subsection{Execution}
+
+When the model returns \texttt{kind = command}, \texttt{doit} prints the command
+and executes it with \texttt{/bin/bash}. Execution uses Python's
+\texttt{subprocess.run} with \texttt{capture\_output=True}, \texttt{text=True},
+and a 20 second timeout. The program writes captured stdout to stdout, captured
+stderr to stderr, and exits with the command return code.
+
+When the model returns \texttt{kind = answer} or \texttt{kind = cannot\_do},
+\texttt{doit} prints the message and does not execute a shell command.
+
+\subsection{Example Interactions}
+
+\begin{verbatim}
+> doit "list files here"
+ls
+docs
+doit
+doit_agent
+pyproject.toml
+tests
+\end{verbatim}
+
+\begin{verbatim}
+> doit "tell me a joke"
+Why did the shell script go to therapy? It had too many unresolved issues.
+\end{verbatim}
+
+\begin{verbatim}
+> doit "change the moon's orbit"
+I cannot change physical objects or astronomical orbits with a shell command.
+\end{verbatim}
+
+\subsection{Limitations}
+
+This version intentionally implements only the first assignment section. It does
+not ask for confirmation before dangerous commands, does not use \texttt{doit.cfg},
+does not support local models, and does not remember previous invocations. It
+also does not ask clarification questions. Those features belong to later parts
+of the assignment.
+
+The main reliability risk is model formatting: if the LLM returns invalid JSON,
+the program reports an error instead of guessing what the model meant. This is
+intentional, because executing a guessed command would be unsafe.
+
